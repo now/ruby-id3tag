@@ -1,0 +1,7 @@
+*.o
+*.so
+*.swp
+TAGS
+ext/id3tag/Makefile
+mkmf.log
+/packages
