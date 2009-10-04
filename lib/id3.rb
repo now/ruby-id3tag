@@ -26,12 +26,12 @@ class ID3::Tag
       index = id
       id = nil
     end
-    frame_find(id, index)
+    find(id, index)
   end
 
-  def each
+  def each(id = nil)
     i = 0
-    while frame = self[i]
+    while frame = (id.nil? ? self[i] : self[id, i])
       yield frame
       i += 1
     end
@@ -40,7 +40,7 @@ class ID3::Tag
 
   [ [:unsynchronized, Flags::Unsynchronisation],
     [:has_extended_header, Flags::ExtendedHeader],
-    [:experimental, Flags::ExterimentalIndicator],
+    [:experimental, Flags::ExperimentalIndicator],
     [:has_footer, Flags::FooterPresent] ].each do |name, bit|
     define_method(:"#{name}?") do
       (flags & bit) != 0
@@ -48,7 +48,7 @@ class ID3::Tag
 
     define_method(:"#{name}=") do |value|
       flags &= ~bit
-      flags |= bit if vale
+      flags |= bit if value
       value
     end
   end
@@ -78,12 +78,34 @@ class ID3::Tag
   end
 end
 
+# TODO: Implement comparable? (<=>)
 class ID3::Frame
   def each
-    i = 0
-    while field = self[i]
-      yield field
-      i += 1
+    n_fields.times do |i|
+      yield self[i]
+    end
+    self
+  end
+
+  def fields
+    @fields || @fields = ID3::Frame::Fields.new(self)
+  end
+end
+
+class ID3::Frame::Fields
+  include Enumerable
+
+  def initialize(frame)
+    @frame = frame
+  end
+
+  def [](index)
+    @frame[index]
+  end
+
+  def each
+    @frame.n_fields.times do |i|
+      yield @frame[i]
     end
     self
   end
@@ -122,7 +144,7 @@ class ID3::File
 
   def update
     render_v1 = @primary.render_v1?
-    v1 = render_v1 ? primary.render : nil
+    v1 = render_v1 ? @primary.render : nil
     @primary.render_v1 = false
     v2 = @primary.render
     write_v2(v2)
@@ -238,7 +260,7 @@ private
     size = query_tag
     return unless size > 0
     tag = add_tag(size)
-    while frame = tag["SEEK"]
+    tag.each("SEEK") do |frame|
       seek = frame[0]
       break if seek < 0
       @io.seek(seek, IO::SEEK_CUR)
@@ -258,7 +280,7 @@ private
   QuerySize = 10
 
   def query_tag
-    save_excursion{ ID3::Tag.tag_query(@io.read(QuerySize)) }
+    save_excursion{ ID3::Tag.at(@io.read(QuerySize)) }
   end
 
   def add_tag(length)
@@ -280,12 +302,12 @@ private
   end
 
   def update_primary(tag)
-    @primary.clear_frames unless tag.is_an_update?
-    tag.each{ |frame| @primary.frame_attach frame }
+    @primary.clear unless tag.is_an_update?
+    tag.each{ |frame| @primary.attach frame }
   end
 
   def read_tag(length)
-    ID3::Tag.tag_parse(@io.read(length))
+    ID3::Tag.parse(@io.read(length))
   end
 
   def find_among_previous_tags(location, length)
@@ -304,18 +326,5 @@ private
 
   def find_overlap(location, length)
     find_among_previous_tags(location, length){ |begin1, end1, begin2, end2| begin1 < end2 and end1 > begin2 }
-  end
-end
-
-if __FILE__ == $0
-  ID3::File.open('01-har_du_problem-radio_edit.mp3', 'r+') do |file|
-  #  file.tag.frame_find('TIT2', 0)[1] = ['Har du “problem”? (Album Mix)']
-    file.tag.each do |frame|
-      puts "#{frame.type} (#{frame.description}):"
-      frame.each do |field|
-        puts "  #{field}"
-      end
-    end
-    file.update
   end
 end
